@@ -122,6 +122,43 @@ func TestNotifier(t *testing.T) {
 			t.Fatalf("notifier is still listening")
 		}
 	})
+
+	t.Run("same topic", func(t *testing.T) {
+		notifier := mustNewNotifier(t, pool, log)
+		topic := randomTopic()
+
+		mustSubscribe(t, notifier, topic, 1)
+		mustSubscribe(t, notifier, topic, 1)
+		time.Sleep(2 * time.Millisecond)
+	})
+
+	t.Run("non-blocking subscriber", func(t *testing.T) {
+		notifier := mustNewNotifier(t, pool, log)
+		topic := randomTopic()
+
+		mustSubscribe(t, notifier, topic, 1) // this channel gets full
+		bigSub := mustSubscribe(t, notifier, topic, 10)
+
+		var count int
+		go func() {
+			for range bigSub.Channel() {
+				count++
+			}
+		}()
+
+		for i := 0; i < 10; i++ {
+			notify(t, pool, topic, "hello")
+		}
+
+		time.Sleep(1 * time.Millisecond)
+		bigSub.Close()
+		time.Sleep(1 * time.Millisecond)
+
+		if want := 10; count != want {
+			t.Fatalf("notification count mismatch; want=%d, got=%d", want, count)
+		}
+
+	})
 }
 
 func notify(t *testing.T, pool *pgxpool.Pool, topic Topic, msg string) {
@@ -143,9 +180,9 @@ func mustNewNotifier(t *testing.T, pool *pgxpool.Pool, log *slog.Logger) *Notifi
 	conn := tmp.Hijack()
 	return NewNotifier(ctx, conn, log)
 }
-func mustSubscribe(t *testing.T, n *Notifier, topic Topic) *Subscription {
+func mustSubscribe(t *testing.T, n *Notifier, topic Topic, size ...int) *Subscription {
 	t.Helper()
-	sub, err := n.Subscribe(topic)
+	sub, err := n.Subscribe(topic, size...)
 	if err != nil {
 		t.Fatalf("failed to sub: %s", err)
 	}

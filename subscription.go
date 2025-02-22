@@ -8,9 +8,6 @@ type Subscription struct {
 	isClosed bool
 }
 
-// A Callback when receiving a message on a subscribed topic
-type Callback func(msg string)
-
 func (s *Subscription) Close() error {
 	if s.isClosed {
 		return nil

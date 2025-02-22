@@ -26,6 +26,7 @@ type Notifier struct {
 
 	// Lock when updating subscribers or otherwise update the state
 	mu sync.Mutex
+	wg sync.WaitGroup
 
 	// whether the notifier is currently listening for notificaitons
 	listening bool
@@ -61,7 +62,9 @@ func (n *Notifier) Subscribe(topic Topic, size ...int) (*Subscription, error) {
 	}
 
 	if !n.listening {
+		n.wg.Add(1)
 		go n.run()
+		n.wg.Wait()
 	}
 
 	id := n.seq
@@ -79,7 +82,10 @@ func (n *Notifier) Subscribe(topic Topic, size ...int) (*Subscription, error) {
 		id:    id,
 		unsub: func() error { return n.unsubscribe(topic, id) },
 	}
-	n.addSubscriber(topic, s)
+	if _, ok := n.subscribers[topic]; !ok {
+		n.subscribers[topic] = []*Subscription{}
+	}
+	n.subscribers[topic] = append(n.subscribers[topic], s)
 
 	return s, nil
 }
@@ -114,13 +120,6 @@ func (n *Notifier) unsubscribe(topic Topic, id int) error {
 	return nil
 }
 
-func (n *Notifier) addSubscriber(topic Topic, s *Subscription) {
-	if _, ok := n.subscribers[topic]; !ok {
-		n.subscribers[topic] = []*Subscription{}
-	}
-	n.subscribers[topic] = append(n.subscribers[topic], s)
-}
-
 // Executes a command on the connection.
 func (n *Notifier) cmdf(format string, a ...any) error {
 
@@ -135,7 +134,10 @@ func (n *Notifier) cmdf(format string, a ...any) error {
 			// start in case there are subscribers.
 			// Not my proudest lines of code..
 			if len(n.subscribers) > 0 {
+				n.wg.Add(1)
 				go n.run()
+				n.wg.Wait()
+
 			}
 		}()
 	}
@@ -147,6 +149,7 @@ func (n *Notifier) cmdf(format string, a ...any) error {
 
 // run listens for notifications and relays them to subscribers
 func (n *Notifier) run() {
+	n.wg.Done()
 	if n.listening {
 		panic("already listening")
 	}
