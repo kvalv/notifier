@@ -93,6 +93,38 @@ func TestNotifier(t *testing.T) {
 		}
 	})
 
+	t.Run("close", func(t *testing.T) {
+		notifier := mustNewNotifier(t, pool, log)
+		topic := randomTopic()
+		sub := mustSubscribe(t, notifier, topic)
+		time.Sleep(1 * time.Millisecond)
+		if !notifier.listening {
+			t.Fatalf("not listening")
+		}
+		if err := sub.Close(); err != nil {
+			t.Fatalf("failed to close: %s", err)
+		}
+		if notifier.listening {
+			t.Fatalf("notifier is still listening")
+		}
+	})
+
+	t.Run("no subscriber stops listening", func(t *testing.T) {
+		notifier := mustNewNotifier(t, pool, log)
+		topic := randomTopic()
+		sub := mustSubscribe(t, notifier, topic)
+		time.Sleep(1 * time.Millisecond)
+		if !notifier.listening {
+			t.Fatalf("not listening")
+		}
+		if err := sub.Close(); err != nil {
+			t.Fatalf("failed to close: %s", err)
+		}
+		time.Sleep(1 * time.Millisecond)
+		if notifier.listening {
+			t.Fatalf("notifier is still listening")
+		}
+	})
 }
 
 func notify(t *testing.T, pool *pgxpool.Pool, topic Topic, msg string) {
@@ -113,4 +145,12 @@ func mustNewNotifier(t *testing.T, pool *pgxpool.Pool, log *slog.Logger) *Notifi
 	}
 	conn := tmp.Hijack()
 	return NewNotifier(ctx, conn, log)
+}
+func mustSubscribe(t *testing.T, n *Notifier, topic Topic) *Subscription {
+	t.Helper()
+	sub, err := n.Subscribe(topic)
+	if err != nil {
+		t.Fatalf("failed to sub: %s", err)
+	}
+	return sub
 }

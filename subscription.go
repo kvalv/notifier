@@ -1,17 +1,17 @@
 package notifier
 
 type Subscription struct {
-	ch     chan string
-	id     int
-	unsub  func() error
-	closed bool
+	ch       chan string
+	id       int
+	unsub    func() error
+	isClosed bool
 }
 
 // A Callback when receiving a message on a subscribed topic
 type Callback func(msg string)
 
 func (s *Subscription) Close() error {
-	if s.closed {
+	if s.isClosed {
 		return nil
 	}
 	close(s.ch)

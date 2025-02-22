@@ -24,39 +24,37 @@ type Notifier struct {
 	// an id (which we use when unsubscribing).
 	seq int
 
-	// Lock when updating subscribers
+	// Lock when updating subscribers or otherwise update the state
 	mu sync.Mutex
 
-	doneListen   chan struct{}
-	cancelListen context.CancelFunc
-	// do not wait for any notifications until we have at least one subscriber
+	// whether the notifier is currently listening for notificaitons
 	listening bool
+	// used to cancel listening for notifications
+	cancel context.CancelFunc
+	// events are sent to this channel when listening has stopped
+	stoppedListen chan struct{}
 }
 
 func NewNotifier(ctx context.Context, conn *pgx.Conn, log *slog.Logger) *Notifier {
 	// ctxListen, cancel := context.WithCancel(ctx)
 	return &Notifier{
-		ctx:         ctx,
-		conn:        conn,
-		log:         log,
-		subscribers: make(map[Topic][]*Subscription),
-		doneListen:  make(chan struct{}, 1),
+		ctx:           ctx,
+		conn:          conn,
+		log:           log,
+		subscribers:   make(map[Topic][]*Subscription),
+		stoppedListen: make(chan struct{}, 1),
 	}
 }
 
-// Creates a new Subscription to topic. Once a notification on the topic is received,
-// callback is invoked. This function will set up the topic subscription before
-// returning. If the Notifier is already listening to the topic, it will not re-issue
-// any LISTEN command.
-func (n *Notifier) Subscribe(topic Topic) (*Subscription, error) {
+// Creates a new Subscription to topic. The channel size is 100, unless size
+// is prvodided.
+//
+// Once a notification on the topic is received, the payload is sent to the
+// channel. If the channel is full when a notification is sent to the subscription,
+// the channel will not receive the notification.
+func (n *Notifier) Subscribe(topic Topic, size ...int) (*Subscription, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-
-	// ... TODO: no need to cancel if we're already listening to the topic
-	if n.listening {
-		n.cancelListen()
-		<-n.doneListen
-	}
 
 	if err := n.cmdf("LISTEN %s", topic); err != nil {
 		return nil, err
@@ -68,8 +66,15 @@ func (n *Notifier) Subscribe(topic Topic) (*Subscription, error) {
 
 	id := n.seq
 	n.seq++
+
+	// by default the channel size is 100, but can be overriden
+	size_ := 100
+	if len(size) > 0 {
+		size_ = size[0]
+	}
+
 	s := &Subscription{
-		ch:    make(chan string, 100),
+		ch:    make(chan string, size_),
 		id:    id,
 		unsub: func() error { return n.unsubscribe(topic, id) },
 	}
@@ -99,8 +104,20 @@ func (n *Notifier) addSubscriber(topic Topic, s *Subscription) {
 	n.subscribers[topic] = append(n.subscribers[topic], s)
 }
 
-// Executes a command on the connection
+// Executes a command on the connection.
 func (n *Notifier) cmdf(format string, a ...any) error {
+
+	// If we're using the connection to listen for notifications, we need to
+	// temporarily stop listening so we can use the connection to send the
+	// command. After the command is sent, we start listening again.
+	if n.listening {
+		n.cancel()
+		<-n.stoppedListen
+		defer func() {
+			go n.run()
+		}()
+	}
+
 	sql := fmt.Sprintf(format, a...)
 	_, err := n.conn.Exec(n.ctx, sql)
 	return err
@@ -113,11 +130,11 @@ func (n *Notifier) run() {
 	}
 	n.listening = true
 	ctx, cancel := context.WithCancel(n.ctx)
-	n.cancelListen = cancel
+	n.cancel = cancel
 	defer func() {
 		n.log.Info("listening done")
 		n.listening = false
-		n.doneListen <- struct{}{}
+		n.stoppedListen <- struct{}{}
 	}()
 	for {
 		n.log.Info("waiting for notification")
@@ -136,20 +153,26 @@ func (n *Notifier) run() {
 		}
 		n.log.Info("received notification", "channel", notif.Channel, "payload", notif.Payload)
 
-		subs, _ := n.subscribers[Topic(notif.Channel)]
+		topic := Topic(notif.Channel)
+		subs, _ := n.subscribers[topic]
 		for _, s := range subs {
 			n.log.Info("sending notification", "count", len(subs), "payload", notif.Payload)
-			s.ch <- notif.Payload
+
+			// Drop messages in case the subscriber channel is full
+			select {
+			case s.ch <- notif.Payload:
+			default:
+			}
 		}
 	}
 }
 
 func (n *Notifier) Close() error {
 	n.conn.Close(n.ctx)
-	n.cancelListen()
+	n.cancel()
 	if n.listening {
-		<-n.doneListen
+		<-n.stoppedListen
 	}
-	close(n.doneListen)
+	close(n.stoppedListen)
 	return nil
 }
