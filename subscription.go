@@ -1,6 +1,7 @@
 package notifier
 
 type Subscription struct {
+	Topic
 	ch       chan string
 	id       int
 	unsub    func() error

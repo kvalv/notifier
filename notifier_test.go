@@ -53,7 +53,6 @@ func TestNotifier(t *testing.T) {
 	})
 
 	t.Run("multiple topics", func(t *testing.T) {
-		// t.Skip()
 		notifier := mustNewNotifier(t, pool, log)
 		topic1, topic2 := randomTopic(), randomTopic()
 		s1, err := notifier.Subscribe(topic1)
@@ -97,7 +96,6 @@ func TestNotifier(t *testing.T) {
 		notifier := mustNewNotifier(t, pool, log)
 		topic := randomTopic()
 		sub := mustSubscribe(t, notifier, topic)
-		time.Sleep(1 * time.Millisecond)
 		if !notifier.listening {
 			t.Fatalf("not listening")
 		}
@@ -113,14 +111,13 @@ func TestNotifier(t *testing.T) {
 		notifier := mustNewNotifier(t, pool, log)
 		topic := randomTopic()
 		sub := mustSubscribe(t, notifier, topic)
-		time.Sleep(1 * time.Millisecond)
 		if !notifier.listening {
 			t.Fatalf("not listening")
 		}
 		if err := sub.Close(); err != nil {
 			t.Fatalf("failed to close: %s", err)
 		}
-		time.Sleep(1 * time.Millisecond)
+		// time.Sleep(10 * time.Millisecond)
 		if notifier.listening {
 			t.Fatalf("notifier is still listening")
 		}
@@ -152,5 +149,7 @@ func mustSubscribe(t *testing.T, n *Notifier, topic Topic) *Subscription {
 	if err != nil {
 		t.Fatalf("failed to sub: %s", err)
 	}
+	// let the connection set up first
+	time.Sleep(1 * time.Millisecond)
 	return sub
 }

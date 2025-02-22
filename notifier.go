@@ -74,6 +74,7 @@ func (n *Notifier) Subscribe(topic Topic, size ...int) (*Subscription, error) {
 	}
 
 	s := &Subscription{
+		Topic: topic,
 		ch:    make(chan string, size_),
 		id:    id,
 		unsub: func() error { return n.unsubscribe(topic, id) },
@@ -90,8 +91,24 @@ func (n *Notifier) unsubscribe(topic Topic, id int) error {
 	if subs, ok := n.subscribers[topic]; ok {
 		del := func(s *Subscription) bool { return s.id == id }
 		n.subscribers[topic] = slices.DeleteFunc(subs, del)
-		if len(n.subscribers[topic]) == 0 {
-			return n.cmdf("UNLISTEN %s", topic)
+
+		if len(n.subscribers[topic]) > 0 {
+			// there are more subscribers, so we still need to listen
+			// to the topic.
+			return nil
+		}
+
+		delete(n.subscribers, topic)
+
+		// No more subscribers for this topic, let's stop listening
+		if err := n.cmdf("UNLISTEN %s", topic); err != nil {
+			return err
+		}
+
+		if len(n.subscribers) == 0 {
+			// ... and if we have no more topics to listen to, we might as well stop
+			// listening altogether
+			n.cancel()
 		}
 	}
 	return nil
@@ -114,7 +131,12 @@ func (n *Notifier) cmdf(format string, a ...any) error {
 		n.cancel()
 		<-n.stoppedListen
 		defer func() {
-			go n.run()
+			// we did listen before, so we start again. Make sure we only
+			// start in case there are subscribers.
+			// Not my proudest lines of code..
+			if len(n.subscribers) > 0 {
+				go n.run()
+			}
 		}()
 	}
 
