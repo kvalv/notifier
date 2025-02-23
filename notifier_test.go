@@ -178,7 +178,7 @@ func mustNewNotifier(t *testing.T, pool *pgxpool.Pool, log *slog.Logger) *Notifi
 		t.Fatalf("failed to acquire connection: %s", err)
 	}
 	conn := tmp.Hijack()
-	return NewNotifier(ctx, conn, log)
+	return New(ctx, conn, log)
 }
 func mustSubscribe(t *testing.T, n *Notifier, topic Topic, size ...int) *Subscription {
 	t.Helper()

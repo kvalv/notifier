@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-type Topic string
+type Topic = string
 
 type Notifier struct {
 	ctx  context.Context
@@ -36,7 +36,7 @@ type Notifier struct {
 	stoppedListen chan struct{}
 }
 
-func NewNotifier(ctx context.Context, conn *pgx.Conn, log *slog.Logger) *Notifier {
+func New(ctx context.Context, conn *pgx.Conn, log *slog.Logger) *Notifier {
 	// ctxListen, cancel := context.WithCancel(ctx)
 	return &Notifier{
 		ctx:           ctx,
